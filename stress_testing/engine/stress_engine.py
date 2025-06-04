@@ -31,61 +31,44 @@ class StressTestEngine:
             False: AbsoluteStressCalculator()
         }
 
-    def run_scenario(self, scenario: StressScenario) -> List[StressResult]:
-        """Run a single stress scenario"""
-        results = []
-
-        # Check if this is an idiosyncratic scenario
-        if scenario.underlying_risk_arrays:
-            return self._run_idiosyncratic_scenario(scenario)
-
-        stress_points = scenario.get_stress_points()
-
-        for stress_point in stress_points:
-            # Calculate P&L for each position
-            position_pnl = {}
-
-            for position in self.portfolio.positions:
-                # Get base parameters
-                base_params = self._get_instrument_params(position.instrument)
-
-                # Apply stress to parameters
-                stressed_params = self._apply_stress(
-                    base_params,
-                    stress_point,
-                    position.instrument,
-                    scenario.factor
-                )
-
-                # Calculate stressed value
-                stressed_value = self._price_instrument(
-                    position.instrument,
-                    stressed_params
-                )
-
-                # Calculate P&L
-                base_value = position.quantity * position.instrument.price
-                stressed_total = position.quantity * stressed_value
-                position_pnl[position.id] = stressed_total - base_value
-
-            # Aggregate P&L
-            aggregated_pnl = self._aggregate_pnl(
-                position_pnl,
-                scenario.aggregation_type,
-                scenario.factor
+    def _calculate_position_pnl(self, positions: List, stress_point: dict, scenario_factor: float) -> dict:
+        """Calculate P&L for a list of positions under stress"""
+        position_pnl = {}
+        
+        for position in positions:
+            base_params = self._get_instrument_params(position.instrument)
+            
+            stressed_params = self._apply_stress(
+                base_params,
+                stress_point,
+                position.instrument,
+                scenario_factor
             )
-
-            # Create result
-            result = StressResult(
-                scenario_name=scenario.name,
-                stress_point=stress_point,
-                position_pnl=position_pnl,
-                aggregated_pnl=aggregated_pnl,
-                total_pnl=sum(position_pnl.values())
+            
+            stressed_value = self._price_instrument(
+                position.instrument,
+                stressed_params
             )
-            results.append(result)
+            
+            base_value = position.quantity * position.instrument.price
+            stressed_total = position.quantity * stressed_value
+            position_pnl[position.id] = stressed_total - base_value
+        
+        return position_pnl
 
-        return results
+    def _generate_stress_points(self, risk_arrays: List) -> List[dict]:
+        """Generate stress points from risk arrays"""
+        if len(risk_arrays) == 1:
+            return [{risk_arrays[0].dimension: val} for val in risk_arrays[0].values]
+        else:
+            # Multiple dimensions
+            stress_points = []
+            for combo in itertools.product(*[ra.values for ra in risk_arrays]):
+                point = {}
+                for i, ra in enumerate(risk_arrays):
+                    point[ra.dimension] = combo[i]
+                stress_points.append(point)
+            return stress_points
 
     def _run_idiosyncratic_scenario(self, scenario: StressScenario) -> List[StressResult]:
         """Run idiosyncratic stress scenario where each underlying has its own risk array"""
@@ -103,58 +86,66 @@ class StressTestEngine:
                 continue
 
             # Get stress points for this underlying
-            underlying_stress_points = []
-            if len(risk_arrays) == 1:
-                underlying_stress_points = [{risk_arrays[0].dimension: val}
-                                            for val in risk_arrays[0].values]
-            else:
-                # Multiple dimensions for this underlying
-                for combo in itertools.product(*[ra.values for ra in risk_arrays]):
-                    point = {}
-                    for i, ra in enumerate(risk_arrays):
-                        point[ra.dimension] = combo[i]
-                    underlying_stress_points.append(point)
+            underlying_stress_points = self._generate_stress_points(risk_arrays)
 
             # Run stress for each point
             for stress_point in underlying_stress_points:
-                position_pnl = {}
-
                 # Only stress positions for this underlying
-                for position in positions_by_underlying[underlying]:
-                    base_params = self._get_instrument_params(position.instrument)
-
-                    stressed_params = self._apply_stress(
-                        base_params,
-                        stress_point,
-                        position.instrument,
-                        scenario.factor
-                    )
-
-                    stressed_value = self._price_instrument(
-                        position.instrument,
-                        stressed_params
-                    )
-
-                    base_value = position.quantity * position.instrument.price
-                    stressed_total = position.quantity * stressed_value
-                    position_pnl[position.id] = stressed_total - base_value
-
-                # For idiosyncratic scenarios, aggregate by underlying
-                aggregated_pnl = {underlying: sum(position_pnl.values())}
-
-                # Add underlying identifier to stress point for clarity
-                stress_point_with_underlying = stress_point.copy()
-                stress_point_with_underlying['underlying'] = underlying
-
-                result = StressResult(
-                    scenario_name=f"{scenario.name}_{underlying}",
-                    stress_point=stress_point_with_underlying,
-                    position_pnl=position_pnl,
-                    aggregated_pnl=aggregated_pnl,
-                    total_pnl=sum(position_pnl.values())
+                position_pnl = self._calculate_position_pnl(
+                    positions_by_underlying[underlying], 
+                    stress_point, 
+                    scenario.factor
                 )
-                results.append(result)
 
+            # For idiosyncratic scenarios, aggregate by underlying
+            aggregated_pnl = {underlying: sum(position_pnl.values())}
+
+            # Add underlying identifier to stress point for clarity
+            stress_point_with_underlying = stress_point.copy()
+            stress_point_with_underlying['underlying'] = underlying
+
+            result = StressResult(
+                scenario_name=f"{scenario.name}_{underlying}",
+                stress_point=stress_point_with_underlying,
+                position_pnl=position_pnl,
+                aggregated_pnl=aggregated_pnl,
+                total_pnl=sum(position_pnl.values())
+            )
+            results.append(result)
+
+        return results
+
+    def run_scenario(self, scenario: StressScenario) -> List[StressResult]:
+        """Run stress scenario and return results"""
+        if scenario.is_idiosyncratic:
+            return self._run_idiosyncratic_scenario(scenario)
+    
+        results = []
+    
+        # Generate stress points for all risk arrays
+        stress_points = self._generate_stress_points(scenario.risk_arrays)
+    
+        # Run stress for each point
+        for stress_point in stress_points:
+            # Calculate P&L for all positions
+            position_pnl = self._calculate_position_pnl(
+                self.portfolio.positions, 
+                stress_point, 
+                scenario.factor
+            )
+        
+            # Aggregate results (implementation depends on your aggregation logic)
+            aggregated_pnl = self._aggregate_pnl(position_pnl)
+        
+            result = StressResult(
+                scenario_name=scenario.name,
+                stress_point=stress_point,
+                position_pnl=position_pnl,
+                aggregated_pnl=aggregated_pnl,
+                total_pnl=sum(position_pnl.values())
+            )
+            results.append(result)
+    
         return results
 
     def run_scenarios(self, scenarios: List[StressScenario]) -> pd.DataFrame:
