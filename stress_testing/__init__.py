@@ -7,6 +7,7 @@ from .core import (
     Factor,
     StressScenario,
     StressResult,
+    ScenarioResults,
 )
 from .engine import StressTestEngine
 from .scenarios import (
@@ -30,6 +31,7 @@ __all__ = [
     "Factor",
     "StressScenario",
     "StressResult",
+    "ScenarioResults",
     # Engine
     "StressTestEngine",
     # Scenario builders
