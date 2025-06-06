@@ -12,17 +12,39 @@ from ..core import (
 def build_price_stress_scenario(name: str, n_up: int = 5, n_down: int = 5,
                                 step_pct: float = 0.05,
                                 factor: Optional[Factor] = None) -> StressScenario:
-    """Build a simple price stress scenario"""
+    """
+    Build a simple price stress scenario
+
+    Args:
+        name: Scenario name
+        n_up: Number of up steps
+        n_down: Number of down steps
+        step_pct: Step size as percentage
+        factor: Optional factor (e.g., beta factor)
+
+    Returns:
+        StressScenario with appropriate aggregation type
+    """
     risk_array = RiskArray.equidistant(
         RiskDimension.PRICE, n_up, n_down, step_pct
     )
+
+    # Determine aggregation type based on factor
+    if factor and factor.name == "beta":
+        # Beta scenarios aggregate across entire portfolio
+        aggregation_type = AggregationType.BY_FACTOR
+    elif factor:
+        # Other factors might aggregate differently
+        aggregation_type = AggregationType.BY_FACTOR
+    else:
+        # No factor - aggregate by underlying
+        aggregation_type = AggregationType.BY_UNDERLYING
 
     return StressScenario(
         name=name,
         risk_arrays=[risk_array],
         factor=factor,
-        aggregation_type=AggregationType.BY_UNDERLYING if not factor
-        else AggregationType.BY_FACTOR
+        aggregation_type=aggregation_type
     )
 
 

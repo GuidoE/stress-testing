@@ -224,6 +224,9 @@ class StressTestEngine:
         """Calculate aggregated P&L arrays"""
         aggregated = defaultdict(lambda: None)
 
+        if len(position_results) == 0:
+            return dict(aggregated)
+
         if aggregation_type == AggregationType.BY_UNDERLYING:
             # Group by underlying
             for result in position_results:
@@ -236,7 +239,14 @@ class StressTestEngine:
             total = np.zeros_like(position_results[0].pnl_values)
             for result in position_results:
                 total += result.pnl_values
-            aggregated['total'] = total
+            aggregated['TOTAL'] = total
+
+        elif aggregation_type == AggregationType.BY_FACTOR:
+            # For factor-based scenarios (e.g., beta), aggregate all positions together
+            total = np.zeros_like(position_results[0].pnl_values)
+            for result in position_results:
+                total += result.pnl_values
+            aggregated['PORTFOLIO'] = total
 
         return dict(aggregated)
 
@@ -289,7 +299,7 @@ class StressTestEngine:
         if hasattr(instrument, 'risk_free'):
             params['interest_rate'] = instrument.risk_free
         if hasattr(instrument, 'yield'):
-            params['dividend_yield'] = instrument.dividend_yield
+            params['dividend_yield'] = instrument.dividen_yield
 
         return params
 
